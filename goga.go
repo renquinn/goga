@@ -2,6 +2,7 @@ package goga
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"sort"
 	"time"
@@ -28,7 +29,7 @@ func getBestChromosome(population []Chromosome) Chromosome {
 	best := population[0]
 
 	for _, individual := range population {
-		if individual.GetFitness() > best.GetFitness() {
+		if individual.GetFitness() > best.GetFitness() || math.IsNaN(best.GetFitness()) {
 			best = individual
 		}
 	}
@@ -120,7 +121,7 @@ func (g *Goga) Selection(population []Chromosome) []Chromosome {
 	for len(parents) < parentsCount {
 		parent, restOfPopulation := selectParent(population)
 		parents = append(parents, parent)
-		population = restOfPopulation
+		population = g.calculatePopulationFitness(restOfPopulation)
 	}
 	return parents
 }
@@ -147,7 +148,7 @@ func (g *Goga) Mutation(generation []Chromosome) []Chromosome {
 
 type Goga struct {
 	target        Chromosome
-	maxIterations int
+	MaxIterations int
 	Result        Chromosome
 	Status        string
 	Converter     func(interface{}) Chromosome
@@ -156,7 +157,7 @@ type Goga struct {
 func Init(chromosomeConverter func(interface{}) Chromosome) *Goga {
 	return &Goga{
 		Converter:     chromosomeConverter,
-		maxIterations: 1000,
+		MaxIterations: 1000,
 	}
 }
 
@@ -166,12 +167,13 @@ func (g *Goga) Run(target Chromosome, population []Chromosome) {
 	rand.Seed(time.Now().UnixNano())
 
 	population = g.calculatePopulationFitness(population)
-	g.Status = fmt.Sprintf("Failed to converge after %d iterations.", g.maxIterations)
+	g.Status = fmt.Sprintf("Failed to converge after %d iterations.", g.MaxIterations)
 
-	for i := 0; i < g.maxIterations; i++ {
+	for i := 0; i < g.MaxIterations; i++ {
 		parents := g.Selection(population)
 		parents = g.calculatePopulationFitness(parents)
 		nextGeneration := g.Crossover(parents)
+		nextGeneration = g.calculatePopulationFitness(nextGeneration)
 		nextGeneration = g.Mutation(nextGeneration)
 
 		// Next generation
