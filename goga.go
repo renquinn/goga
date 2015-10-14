@@ -4,16 +4,23 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"runtime"
 	"sort"
+	"sync"
 	"time"
 )
 
 // Calculates the fitness score for each member in the population
 func (g *Goga) calculatePopulationFitness(population []Chromosome) []Chromosome {
-	for i, member := range population {
-		member.CalculateFitness(g.target)
-		population[i] = member
+	var wg sync.WaitGroup
+	for i := range population {
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			population[j].CalculateFitness(g.target)
+		}(i)
 	}
+	wg.Wait()
 	return population
 }
 
@@ -42,6 +49,7 @@ type Chromosome interface {
 	Breed(interface{}) (interface{}, interface{}) // Creates two member children from two parents using a single crossover site
 	CalculateFitness(interface{})                 // Calculate and set a chromosome's fitness value
 	GetFitness() float64                          // Returns the chomosome's fitness score
+	GetKey() string                               // Returns the chomosome's key
 	IsGoodEnough() bool                           // Returns true if the Chromosome has a fitness score above a certain threshold
 	Mutate()                                      // Mutate a single chromosome
 	Normalize(float64)                            // Normalize a chromosome's fitness value, takes total fitness of population
@@ -121,7 +129,7 @@ func (g *Goga) Selection(population []Chromosome) []Chromosome {
 	for len(parents) < parentsCount {
 		parent, restOfPopulation := selectParent(population)
 		parents = append(parents, parent)
-		population = g.calculatePopulationFitness(restOfPopulation)
+		population = restOfPopulation
 	}
 	return parents
 }
@@ -129,20 +137,48 @@ func (g *Goga) Selection(population []Chromosome) []Chromosome {
 // Creates two offspring chromosomes to be added to the population essentially
 // replacing the given parents
 func (g *Goga) Crossover(parents []Chromosome) []Chromosome {
-	nextGeneration := make([]Chromosome, 0)
-	for i := 0; i < len(parents); i += 2 {
-		child1, child2 := parents[i].Breed(parents[i+1])
-		nextGeneration = append(nextGeneration, g.Converter(child1), g.Converter(child2))
+	length := len(parents)
+	if length%4 != 0 {
+		parents = parents[:length-(length%4)]
+		length = len(parents)
 	}
+
+	c := make(chan []interface{})
+	for i := 0; i < length; i += 2 {
+		go func(j int) {
+			child1, child2 := parents[j].Breed(parents[j+1])
+			c <- []interface{}{child1, child2}
+		}(i)
+	}
+
+	nextGeneration := make([]Chromosome, 0)
+	count := 0
+	for children := range c {
+		nextGeneration = append(nextGeneration, g.Converter(children[0]), g.Converter(children[1]))
+		count += 2
+		if count >= length {
+			close(c)
+		}
+	}
+
 	return nextGeneration
 }
 
 // Randomly changes chromosomes in the population to prevent premature convergence
 func (g *Goga) Mutation(generation []Chromosome) []Chromosome {
+	var wg sync.WaitGroup
+
 	for i := range generation {
-		generation[i].Mutate()
-		generation[i].CalculateFitness(g.target)
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			generation[j].Mutate()
+			generation[j].CalculateFitness(g.target)
+		}(i)
 	}
+
+	wg.Wait()
+
 	return generation
 }
 
@@ -162,19 +198,45 @@ func Init(chromosomeConverter func(interface{}) Chromosome) *Goga {
 }
 
 func (g *Goga) Run(target Chromosome, population []Chromosome) {
+	fmt.Println("\tSetting GOMAXPROCS to 16. Previous setting was", runtime.GOMAXPROCS(16))
 	g.target = target
 
 	rand.Seed(time.Now().UnixNano())
 
+	var checkpoint time.Time
+	fmt.Print("\tcalculatePopulationFitness(population)")
+	checkpoint = time.Now()
 	population = g.calculatePopulationFitness(population)
+	fmt.Println(" // Took:", time.Since(checkpoint))
+
 	g.Status = fmt.Sprintf("Failed to converge after %d iterations.", g.MaxIterations)
 
 	for i := 0; i < g.MaxIterations; i++ {
+		fmt.Println("\tGeneration:", i)
+		fmt.Print("\t\tSelection()")
+		checkpoint = time.Now()
 		parents := g.Selection(population)
+		fmt.Println(" // Took:", time.Since(checkpoint))
+		fmt.Print("\t\tcalculatePopulationFitness(parents)")
+		checkpoint = time.Now()
 		parents = g.calculatePopulationFitness(parents)
+		fmt.Println(" // Took:", time.Since(checkpoint))
+		fmt.Print("\t\tCrossover()")
+		checkpoint = time.Now()
 		nextGeneration := g.Crossover(parents)
-		nextGeneration = g.calculatePopulationFitness(nextGeneration)
+		fmt.Println(" // Took:", time.Since(checkpoint))
+		// fmt.Print("\t\tcalculatePopulationFitness(nextGeneration)")
+		// checkpoint = time.Now()
+		// nextGeneration = g.calculatePopulationFitness(nextGeneration)
+		// fmt.Println(" // Took:", time.Since(checkpoint))
+		fmt.Print("\t\tMutation()")
+		checkpoint = time.Now()
 		nextGeneration = g.Mutation(nextGeneration)
+		fmt.Println(" // Took:", time.Since(checkpoint))
+		fmt.Print("\t\tLearning()")
+		checkpoint = time.Now()
+		nextGeneration = g.Learn(nextGeneration)
+		fmt.Println(" // Took:", time.Since(checkpoint))
 
 		// Next generation
 		population = append(parents, nextGeneration...)
@@ -183,6 +245,8 @@ func (g *Goga) Run(target Chromosome, population []Chromosome) {
 		if isGoodEnough(nextGeneration) {
 			g.Status = fmt.Sprintf("Took %d generations.", i)
 			break
+		} else {
+			fmt.Println("\tBest Chromosome:", g.Result)
 		}
 	}
 }
