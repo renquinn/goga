@@ -52,6 +52,7 @@ type Chromosome interface {
 	GetKey() string                               // Returns the chomosome's key
 	IsGoodEnough() bool                           // Returns true if the Chromosome has a fitness score above a certain threshold
 	Mutate()                                      // Mutate a single chromosome
+	Learn()                                       // Learn a single chromosome
 	Normalize(float64)                            // Normalize a chromosome's fitness value, takes total fitness of population
 	String() string                               // Returns a string representation of the chromosome
 }
@@ -173,6 +174,24 @@ func (g *Goga) Mutation(generation []Chromosome) []Chromosome {
 		go func(j int) {
 			defer wg.Done()
 			generation[j].Mutate()
+			generation[j].CalculateFitness(g.target)
+		}(i)
+	}
+
+	wg.Wait()
+
+	return generation
+}
+
+// Randomly changes chromosomes in the population to prevent premature convergence
+func (g *Goga) Learn(generation []Chromosome) []Chromosome {
+	var wg sync.WaitGroup
+
+	for i := range generation {
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			generation[j].Learn()
 			generation[j].CalculateFitness(g.target)
 		}(i)
 	}
