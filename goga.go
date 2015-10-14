@@ -233,10 +233,6 @@ func (g *Goga) Run(target Chromosome, population []Chromosome) {
 		checkpoint = time.Now()
 		nextGeneration = g.Mutation(nextGeneration)
 		fmt.Println(" // Took:", time.Since(checkpoint))
-		fmt.Print("\t\tLearning()")
-		checkpoint = time.Now()
-		nextGeneration = g.Learn(nextGeneration)
-		fmt.Println(" // Took:", time.Since(checkpoint))
 
 		// Next generation
 		population = append(parents, nextGeneration...)
